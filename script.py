@@ -56,7 +56,16 @@ def save_progress(data):
     write_json_file(PROGRESS_FILE, data)
 
 
-def update_progress(status=None, last_position=None, last_artist_id=None, total=None, processed=None, message=None):
+def update_progress(
+    status=None,
+    last_position=None,
+    last_artist_id=None,
+    total=None,
+    processed=None,
+    current_artist=None,
+    progress_pct=None,
+    message=None
+):
     progress = load_progress()
 
     if status is not None:
@@ -69,6 +78,10 @@ def update_progress(status=None, last_position=None, last_artist_id=None, total=
         progress["total"] = total
     if processed is not None:
         progress["processed"] = processed
+    if current_artist is not None:
+        progress["current_artist"] = current_artist
+    if progress_pct is not None:
+        progress["progress_pct"] = progress_pct
     if message is not None:
         progress["message"] = message
 
