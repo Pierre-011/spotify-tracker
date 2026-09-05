@@ -220,3 +220,47 @@ a{color:inherit;text-decoration:none}
   cursor: pointer;
   font-weight: 800;
 }
+.editor-actions{
+  display:flex;
+  justify-content:flex-start;
+  margin: 12px 0 18px 0;
+}
+
+.artist-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  padding:12px 14px;
+  border-radius:14px;
+  background:rgba(255,255,255,.03);
+  border:1px solid var(--line);
+  cursor:pointer;
+}
+
+.artist-main{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.artist-select{
+  background:transparent;
+  border:none;
+  padding:0;
+  color:var(--text);
+  font-weight:800;
+  font-size:15px;
+  cursor:pointer;
+  text-align:left;
+}
+
+.artist-select:hover{
+  text-decoration:underline;
+}
+
+.item-actions{
+  display:flex;
+  gap:8px;
+  flex-shrink:0;
+}
