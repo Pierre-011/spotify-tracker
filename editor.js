@@ -24,12 +24,20 @@ function parseGenres(v){
 function renderIndex(){
   const q = (search.value || '').toLowerCase();
   const items = Object.values(db.artists || {}).filter(a => `${a.name||''} ${a.id}`.toLowerCase().includes(q));
-  indexBox.innerHTML = items.map(a =>
-    `<button type="button" class="artist-row" data-id="${a.id}">
-      <div><strong>${a.name || a.id}</strong><div class="muted small">${a.id}</div></div>
+  indexBox.innerHTML = items.map(a => {
+  const spotifyUrl = a.url || `https://open.spotify.com/artist/${a.id}`;
+  return `
+    <div class="artist-row">
+      <div>
+        <a href="${spotifyUrl}" target="_blank" rel="noopener noreferrer" class="artist-link">
+          <strong>${a.name || a.id}</strong>
+        </a>
+        <div class="muted small">${a.id}</div>
+      </div>
       <span class="muted">${a.monthly_listeners ?? '—'}</span>
-    </button>`
-  ).join('');
+    </div>
+  `;
+}).join('');
   indexBox.querySelectorAll('button[data-id]').forEach(btn => btn.addEventListener('click', () => select(btn.dataset.id)));
 }
 
