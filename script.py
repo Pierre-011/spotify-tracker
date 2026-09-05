@@ -199,8 +199,8 @@ def extract_related_artists(html, source_artist_id, existing_ids):
 
     matches = pattern.findall(html)
 
-print("Liens artistes détectés :", len(matches))
-print("Exemples :", matches[:5])
+    print("Liens artistes détectés :", len(matches))
+    print("Exemples :", matches[:5])
 
     print()
     print("Liens artistes détectés : {}".format(len(matches)))
