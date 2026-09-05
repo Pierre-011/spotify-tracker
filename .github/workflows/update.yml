@@ -1,4 +1,5 @@
 name: update-data
+
 on:
   schedule:
     - cron: '0 */2 * * *'
@@ -7,14 +8,20 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+
       - run: pip install playwright
+
       - run: python -m playwright install --with-deps chromium
+
       - run: python script.py
+
       - name: Commit data
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
