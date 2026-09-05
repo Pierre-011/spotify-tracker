@@ -8,6 +8,8 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 
 JSON_FILE = "artistes.json"
+PROGRESS_FILE = "progress.json"
+LOG_FILE = "last-run.json"
 EXTRACTION_DELAY = 2
 SPOTIFY_DOMAIN = "https://open.spotify.com"
 MONTHLY_LISTENER_LIMIT = 10000
@@ -16,6 +18,52 @@ START_ARTIST_NUMBER = 3000
 
 def now():
     return datetime.now().isoformat(timespec="seconds")
+
+
+def write_json_file(path, data):
+    temporary_file = path + ".tmp"
+    with open(temporary_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+    os.replace(temporary_file, path)
+
+
+def update_progress(**kwargs):
+    data = {
+        "status": "running",
+        "progress_pct": None,
+        "current_artist": None,
+        "processed": 0,
+        "total": 0,
+        "updated_artists": 0,
+        "last_update": now(),
+        "message": None
+    }
+
+    if os.path.exists(PROGRESS_FILE):
+        try:
+            with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if isinstance(existing, dict):
+                data.update(existing)
+        except Exception:
+            pass
+
+    data.update(kwargs)
+    data["last_update"] = now()
+    write_json_file(PROGRESS_FILE, data)
+
+
+def write_log(message, level="info", extra=None):
+    payload = {
+        "timestamp": now(),
+        "level": level,
+        "message": message,
+        "extra": extra or {}
+    }
+    try:
+        write_json_file(LOG_FILE, payload)
+    except Exception:
+        pass
 
 
 def extract_artist_id(url):
@@ -451,6 +499,7 @@ def process_related_page(browser, database, related_url):
             database["artists"][artist_id] = artist_data
             existing_ids.add(artist_id)
             save_database(database)
+            update_progress(updated_artists=len(database["artists"]))
             print()
             print("✅ Nouvel artiste enregistré.")
     finally:
@@ -468,10 +517,19 @@ def process_all_artists(browser, database, start_artist_number=1):
         return database
 
     total = len(artist_items)
+    processed = 0
 
     for position, (artist_id, artist_data) in enumerate(artist_items, start=1):
         if position < start_artist_number:
             continue
+
+        processed += 1
+        update_progress(
+            total=total,
+            processed=processed,
+            current_artist=artist_id,
+            progress_pct=(processed / total) * 100 if total else 0
+        )
 
         print()
         print("=" * 70)
@@ -514,7 +572,7 @@ def main():
     print()
     print("Seuil auditeurs mensuels : {}".format(MONTHLY_LISTENER_LIMIT))
     print("Délai avant extraction : {} seconde(s)".format(EXTRACTION_DELAY))
-    print("Navigateur : Microsoft Edge")
+    print("Navigateur : Chromium headless")
     print("Fichier : {}".format(JSON_FILE))
     print("Démarrage à partir de l'artiste numéro : {}".format(START_ARTIST_NUMBER))
 
@@ -526,30 +584,46 @@ def main():
     if not database["artists"]:
         print()
         print("Aucun artiste dans le JSON.")
+        write_log("Aucun artiste à traiter.", "warning")
+        update_progress(status="idle", message="Aucun artiste à traiter", total=0, processed=0, progress_pct=0)
         return
+
+    write_log("Démarrage du scraping.")
+    update_progress(status="running", total=len(database["artists"]), processed=0, progress_pct=0, current_artist=None)
 
     with sync_playwright() as p:
         print()
-        print("Démarrage de Microsoft Edge...")
+        print("Démarrage de Chromium...")
 
         try:
-            browser = p.chromium.launch(channel="msedge", headless=False)
+            browser = p.chromium.launch(headless=True)
         except Exception as error:
             print()
-            print("❌ Impossible de démarrer Edge.")
-            print("➡️ Vérifie l'installation avec : python -m playwright install msedge")
+            print("❌ Impossible de démarrer Chromium.")
+            print("➡️ Vérifie l'installation avec : python -m playwright install --with-deps chromium")
             print(error)
+            write_log("Impossible de démarrer Chromium.", "error", {"error": str(error)})
+            update_progress(status="error", message="Impossible de démarrer Chromium")
             return
 
         try:
             database = process_all_artists(browser, database, start_artist_number=START_ARTIST_NUMBER)
         finally:
             print()
-            print("Fermeture de Microsoft Edge...")
+            print("Fermeture de Chromium...")
             try:
                 browser.close()
             except Exception:
                 pass
+
+    save_database(database)
+    update_progress(
+        status="done",
+        current_artist=None,
+        message="Terminé",
+        progress_pct=100
+    )
+    write_log("Programme terminé.", "success", {"total_artists": len(database["artists"])})
 
     print()
     print("=" * 70)
