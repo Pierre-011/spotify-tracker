@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spotify Artist Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">Spotify Artist Tracker</div>
+        <div class="muted">Suivi + édition du JSON</div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+        <button class="nav-btn" data-view="editor">Éditeur</button>
+        <button class="nav-btn" data-view="logs">Logs</button>
+      </nav>
+
+      <div class="sidebar-card">
+        <div class="label">Statut GitHub</div>
+        <div id="ghStatus" class="big-value">Inconnu</div>
+        <div id="ghMeta" class="muted small">Chargement...</div>
+      </div>
+
+      <div class="sidebar-card">
+        <div class="label">Dernière sauvegarde</div>
+        <div id="lastSave" class="big-value">—</div>
+      </div>
+
+      <button id="refreshBtn" class="primary-btn">Rafraîchir</button>
+      <a class="secondary-link" href="editor.html">Ouvrir l’éditeur complet</a>
+    </aside>
+
+    <main class="content">
+      <section id="dashboardView" class="view active">
+        <header class="hero">
+          <div>
+            <h1>Avancement du collecteur Spotify</h1>
+            <p>Visualise l’état du scraping, l’évolution du JSON et les derniers artistes traités.</p>
+          </div>
+          <div class="hero-card">
+            <div class="label">Progression</div>
+            <div id="progressText" class="progress-text">0%</div>
+            <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+          </div>
+        </header>
+
+        <section class="grid stats-grid">
+          <div class="card stat"><div class="label">Artistes</div><div id="totalArtists" class="value">0</div></div>
+          <div class="card stat"><div class="label">Complétés</div><div id="doneArtists" class="value">0</div></div>
+          <div class="card stat"><div class="label">En attente</div><div id="pendingArtists" class="value">0</div></div>
+          <div class="card stat"><div class="label">Nouveaux</div><div id="newArtists" class="value">0</div></div>
+        </section>
+
+        <section class="grid two-col">
+          <div class="card">
+            <div class="section-head"><h2>Derniers artistes</h2><span class="muted">Données du JSON</span></div>
+            <div id="recentArtists" class="list"></div>
+          </div>
+          <div class="card">
+            <div class="section-head"><h2>État du run</h2><span class="muted">progress.json</span></div>
+            <div id="runState" class="run-state"></div>
+          </div>
+        </section>
+      </section>
+
+      <section id="editorView" class="view">
+        <header class="section-head">
+          <div>
+            <h2>Édition rapide</h2>
+            <p class="muted">Modifie un artiste existant puis enregistre directement dans GitHub.</p>
+          </div>
+          <a class="secondary-link" href="editor.html">Éditeur avancé</a>
+        </header>
+        <div class="card editor-preview">
+          <input id="searchInput" class="input" placeholder="Rechercher un artiste..." />
+          <div id="quickList" class="artist-list"></div>
+        </div>
+      </section>
+
+      <section id="logsView" class="view">
+        <div class="card">
+          <div class="section-head"><h2>Logs récents</h2><span class="muted">last-run.json</span></div>
+          <pre id="logsBox" class="pre-box"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
