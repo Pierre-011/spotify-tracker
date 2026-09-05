@@ -193,11 +193,14 @@ def extract_related_artists(html, source_artist_id, existing_ids):
         return artists
 
     pattern = re.compile(
-        r'href\s*=\s*["\']([^"\']*?/artist/[A-Za-z0-9]+[^"\']*)["\']',
-        flags=re.IGNORECASE
+    r'href\s*=\s*["\']([^"\']*?/artist/[^"\']+)["\']',
+    flags=re.IGNORECASE
     )
 
     matches = pattern.findall(html)
+
+print("Liens artistes détectés :", len(matches))
+print("Exemples :", matches[:5])
 
     print()
     print("Liens artistes détectés : {}".format(len(matches)))
