@@ -208,3 +208,15 @@ a{color:inherit;text-decoration:none}
   .hero-card{min-width:0}
   .form-grid{grid-template-columns:1fr}
 }
+.artist-link {
+  color: #ffffff;
+  text-decoration: none;
+}
+.artist-link:hover {
+  text-decoration: underline;
+}
+.artist-select {
+  all: unset;
+  cursor: pointer;
+  font-weight: 800;
+}
