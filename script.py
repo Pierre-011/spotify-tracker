@@ -13,7 +13,7 @@ LOG_FILE = "last-run.json"
 EXTRACTION_DELAY = 2
 SPOTIFY_DOMAIN = "https://open.spotify.com"
 MONTHLY_LISTENER_LIMIT = 10000
-START_ARTIST_NUMBER = 3000
+BATCH_SIZE = 500
 
 
 def now():
@@ -22,35 +22,66 @@ def now():
 
 def write_json_file(path, data):
     temporary_file = path + ".tmp"
-    with open(temporary_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    with open(temporary_file, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=4)
     os.replace(temporary_file, path)
 
 
-def update_progress(**kwargs):
-    data = {
-        "status": "running",
-        "progress_pct": None,
-        "current_artist": None,
-        "processed": 0,
-        "total": 0,
-        "updated_artists": 0,
-        "last_update": now(),
-        "message": None
+def load_json_file(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        if isinstance(data, dict):
+            return data
+    except Exception as error:
+        print()
+        print("⚠️ Erreur lecture {} : {}".format(path, error))
+    return default
+
+
+def load_progress():
+    default = {
+        "last_position": 0,
+        "last_artist_id": None,
+        "status": "idle",
+        "updated_at": None,
+        "batch_size": BATCH_SIZE
     }
+    return load_json_file(PROGRESS_FILE, default)
 
-    if os.path.exists(PROGRESS_FILE):
-        try:
-            with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-            if isinstance(existing, dict):
-                data.update(existing)
-        except Exception:
-            pass
 
-    data.update(kwargs)
-    data["last_update"] = now()
+def save_progress(data):
     write_json_file(PROGRESS_FILE, data)
+
+
+def update_progress(status=None, last_position=None, last_artist_id=None, total=None, processed=None, message=None):
+    progress = load_progress()
+
+    if status is not None:
+        progress["status"] = status
+    if last_position is not None:
+        progress["last_position"] = last_position
+    if last_artist_id is not None:
+        progress["last_artist_id"] = last_artist_id
+    if total is not None:
+        progress["total"] = total
+    if processed is not None:
+        progress["processed"] = processed
+    if message is not None:
+        progress["message"] = message
+
+    progress["batch_size"] = BATCH_SIZE
+    progress["updated_at"] = now()
+
+    if progress.get("total") and progress.get("processed") is not None:
+        try:
+            progress["progress_pct"] = round((progress["processed"] / progress["total"]) * 100, 2)
+        except Exception:
+            progress["progress_pct"] = None
+
+    save_progress(progress)
 
 
 def write_log(message, level="info", extra=None):
@@ -265,9 +296,7 @@ def extract_genres(html, artist_id):
     genres = []
     escaped_id = re.escape(artist_id)
 
-    pattern = (
-        r'"id"\s*:\s*"' + escaped_id + r'".{0,5000}?"genres"\s*:\s*\[([^\]]*)\]'
-    )
+    pattern = r'"id"\s*:\s*"' + escaped_id + r'".{0,5000}?"genres"\s*:\s*\[([^\]]*)\]'
 
     match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
     if match:
@@ -289,9 +318,7 @@ def extract_images(html, artist_id):
     images = []
     escaped_id = re.escape(artist_id)
 
-    pattern = (
-        r'"id"\s*:\s*"' + escaped_id + r'".{0,10000}?"images"\s*:\s*\[(.*?)\]'
-    )
+    pattern = r'"id"\s*:\s*"' + escaped_id + r'".{0,10000}?"images"\s*:\s*\[(.*?)\]'
 
     match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
     if not match:
@@ -499,7 +526,6 @@ def process_related_page(browser, database, related_url):
             database["artists"][artist_id] = artist_data
             existing_ids.add(artist_id)
             save_database(database)
-            update_progress(updated_artists=len(database["artists"]))
             print()
             print("✅ Nouvel artiste enregistré.")
     finally:
@@ -514,21 +540,31 @@ def process_all_artists(browser, database, start_artist_number=1):
     if not artist_items:
         print()
         print("Aucun artiste à traiter dans le JSON.")
-        return database
+        return database, 0
 
     total = len(artist_items)
     processed = 0
+    last_position = 0
 
     for position, (artist_id, artist_data) in enumerate(artist_items, start=1):
         if position < start_artist_number:
             continue
 
+        if processed >= BATCH_SIZE:
+            break
+
         processed += 1
+        last_position = position
+
         update_progress(
+            status="running",
             total=total,
             processed=processed,
             current_artist=artist_id,
-            progress_pct=(processed / total) * 100 if total else 0
+            last_position=last_position,
+            last_artist_id=artist_id,
+            progress_pct=(last_position / total) * 100 if total else 0,
+            message="Traitement en cours"
         )
 
         print()
@@ -560,7 +596,7 @@ def process_all_artists(browser, database, start_artist_number=1):
 
         database = process_related_page(browser, database, related_url)
 
-    return database
+    return database, last_position
 
 
 def main():
@@ -574,12 +610,16 @@ def main():
     print("Délai avant extraction : {} seconde(s)".format(EXTRACTION_DELAY))
     print("Navigateur : Chromium headless")
     print("Fichier : {}".format(JSON_FILE))
-    print("Démarrage à partir de l'artiste numéro : {}".format(START_ARTIST_NUMBER))
+    print("Taille du lot : {}".format(BATCH_SIZE))
 
     database = load_database()
+    progress = load_progress()
+
+    start_artist_number = progress.get("last_position", 0) + 1
 
     print()
     print("Artistes déjà présents : {}".format(len(database["artists"])))
+    print("Reprise à partir de l'artiste numéro : {}".format(start_artist_number))
 
     if not database["artists"]:
         print()
@@ -589,7 +629,15 @@ def main():
         return
 
     write_log("Démarrage du scraping.")
-    update_progress(status="running", total=len(database["artists"]), processed=0, progress_pct=0, current_artist=None)
+    update_progress(
+        status="running",
+        total=len(database["artists"]),
+        processed=0,
+        current_artist=None,
+        last_position=start_artist_number - 1,
+        last_artist_id=None,
+        message="Démarrage du lot"
+    )
 
     with sync_playwright() as p:
         print()
@@ -607,7 +655,7 @@ def main():
             return
 
         try:
-            database = process_all_artists(browser, database, start_artist_number=START_ARTIST_NUMBER)
+            database, last_position = process_all_artists(browser, database, start_artist_number=start_artist_number)
         finally:
             print()
             print("Fermeture de Chromium...")
@@ -617,19 +665,31 @@ def main():
                 pass
 
     save_database(database)
+
+    next_start = last_position + 1
     update_progress(
-        status="done",
+        status="paused",
         current_artist=None,
-        message="Terminé",
-        progress_pct=100
+        last_position=last_position,
+        last_artist_id=None,
+        message="Lot terminé",
+        progress_pct=(last_position / len(database["artists"]) * 100) if database["artists"] else 0
     )
-    write_log("Programme terminé.", "success", {"total_artists": len(database["artists"])})
+
+    write_log("Lot terminé.", "success", {
+        "last_position": last_position,
+        "next_start": next_start,
+        "batch_size": BATCH_SIZE,
+        "total_artists": len(database["artists"])
+    })
 
     print()
     print("=" * 70)
-    print("PROGRAMME TERMINÉ")
+    print("LOT TERMINÉ")
     print("=" * 70)
     print()
+    print("Dernière position traitée : {}".format(last_position))
+    print("Prochain démarrage : {}".format(next_start))
     print("Total artistes dans le JSON : {}".format(len(database["artists"])))
     print("Fichier : {}".format(JSON_FILE))
     print()
