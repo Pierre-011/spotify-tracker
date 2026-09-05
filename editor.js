@@ -7,6 +7,7 @@ const search = $('#editorSearch');
 const title = $('#editorTitle');
 const dirtyFlag = $('#dirtyFlag');
 const imagesField = $('#imagesField');
+const spotifyLink = $('#spotifyLink');
 
 let db = { artists: {} };
 let currentId = null;
@@ -51,10 +52,8 @@ function renderIndex() {
   });
 
   indexBox.innerHTML = items.map(a => {
-    const spotifyUrl = getSpotifyUrl(a);
-
     return `
-      <div class="artist-row">
+      <div class="artist-row" data-id="${escapeHtml(a.id)}">
         <div class="artist-main">
           <button type="button" class="artist-select" data-id="${escapeHtml(a.id)}">
             ${escapeHtml(a.name || a.id)}
@@ -62,23 +61,23 @@ function renderIndex() {
           <div class="muted small">${escapeHtml(a.id)}</div>
         </div>
 
-        <div class="item-actions">
-          <a
-            href="${escapeHtml(spotifyUrl)}"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="secondary-btn"
-            title="Ouvrir dans Spotify"
-          >
-            Spotify
-          </a>
-        </div>
+        <span class="muted">${a.monthly_listeners ?? '—'}</span>
       </div>
     `;
   }).join('');
 
+  indexBox.querySelectorAll('.artist-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button') || e.target.closest('a')) return;
+      select(row.dataset.id);
+    });
+  });
+
   indexBox.querySelectorAll('.artist-select').forEach(btn => {
-    btn.addEventListener('click', () => select(btn.dataset.id));
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      select(btn.dataset.id);
+    });
   });
 }
 
@@ -133,6 +132,10 @@ function select(id) {
   setDirty(false);
   statusBox.textContent = `Sélection: ${id}`;
   location.hash = id;
+
+  const spotifyUrl = getSpotifyUrl(original);
+  spotifyLink.href = spotifyUrl;
+  spotifyLink.style.display = 'inline-flex';
 }
 
 async function load() {
