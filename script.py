@@ -14,6 +14,7 @@ EXTRACTION_DELAY = 2
 SPOTIFY_DOMAIN = "https://open.spotify.com"
 MONTHLY_LISTENER_LIMIT = 10000
 BATCH_SIZE = 50
+HEADLESS = True
 
 
 def log(message=""):
@@ -90,7 +91,6 @@ def update_progress(
 
     progress["batch_size"] = BATCH_SIZE
     progress["updated_at"] = now()
-
     save_progress(progress)
 
 
@@ -110,7 +110,6 @@ def write_log(message, level="info", extra=None):
 def extract_artist_id(url):
     if not url:
         return None
-
     url = url.strip()
     match = re.search(
         r"https?://open\.spotify\.com/(?:[^/]+/)*artist/([A-Za-z0-9]+)",
@@ -127,7 +126,6 @@ def build_artist_url(artist_id):
 def build_related_url(artist_url):
     if not artist_url:
         return None
-
     artist_url = artist_url.strip().rstrip("/")
     if artist_url.endswith("/related"):
         return artist_url
@@ -137,17 +135,13 @@ def build_related_url(artist_url):
 def load_database():
     if not os.path.exists(JSON_FILE):
         return {"artists": {}}
-
     try:
         with open(JSON_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
-
         if not isinstance(data, dict):
             return {"artists": {}}
-
         if "artists" not in data or not isinstance(data["artists"], dict):
             data["artists"] = {}
-
         return data
     except Exception as error:
         log("⚠️ Erreur lecture JSON : {}".format(error))
@@ -156,16 +150,60 @@ def load_database():
 
 def save_database(database):
     temporary_file = JSON_FILE + ".tmp"
-
     try:
         with open(temporary_file, "w", encoding="utf-8") as file:
             json.dump(database, file, ensure_ascii=False, indent=4)
-
         os.replace(temporary_file, JSON_FILE)
         return True
     except Exception as error:
         log("❌ Erreur sauvegarde JSON : {}".format(error))
         return False
+
+
+def extract_related_artists(html, source_artist_id, existing_ids):
+    artists = {}
+    if not html:
+        return artists
+
+    pattern = re.compile(
+        r'href\s*=\s*["\']([^"\']*?/artist/[A-Za-z0-9]+[^"\']*)["\']',
+        flags=re.IGNORECASE
+    )
+    matches = pattern.findall(html)
+
+    log("Liens artistes détectés : {}".format(len(matches)))
+
+    for raw_url in matches:
+        url = raw_url.replace("\\/", "/").replace("&amp;", "&")
+        if url.startswith("/"):
+            url = SPOTIFY_DOMAIN + url
+
+        artist_id = extract_artist_id(url)
+        if not artist_id:
+            continue
+        if artist_id == source_artist_id:
+            continue
+        if artist_id in existing_ids or artist_id in artists:
+            continue
+
+        clean_url = build_artist_url(artist_id)
+        timestamp = now()
+        artists[artist_id] = {
+            "id": artist_id,
+            "name": None,
+            "url": clean_url,
+            "uri": "spotify:artist:" + artist_id,
+            "followers": None,
+            "monthly_listeners": None,
+            "popularity": None,
+            "genres": [],
+            "images": [],
+            "external_urls": {"spotify": clean_url},
+            "first_seen": timestamp,
+            "last_seen": timestamp
+        }
+
+    return artists
 
 
 def find_integer_value(html, keys):
@@ -187,7 +225,6 @@ def extract_artist_name(html, artist_id):
         r'"id"\s*:\s*"' + escaped_id + r'".{0,5000}?"name"\s*:\s*"([^"]+)"',
         r"<title[^>]*>(.*?)</title>"
     ]
-
     for pattern in patterns:
         match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
         if not match:
@@ -197,10 +234,8 @@ def extract_artist_name(html, artist_id):
         name = re.sub(r"<[^>]+>", "", name)
         name = name.replace("&amp;", "&").replace("\\/", "/").strip()
         name = re.sub(r"\s*[|–-]\s*Spotify.*$", "", name, flags=re.IGNORECASE).strip()
-
         if name:
             return name
-
     return None
 
 
@@ -208,7 +243,6 @@ def extract_followers(html):
     value = find_integer_value(html, ["followers", "totalFollowers"])
     if value is not None:
         return value
-
     for pattern in [
         r'"followers"\s*:\s*\{\s*"total"\s*:\s*([0-9]+)',
         r'"totalFollowers"\s*:\s*([0-9]+)'
@@ -219,7 +253,6 @@ def extract_followers(html):
                 return int(match.group(1))
             except ValueError:
                 pass
-
     return None
 
 
@@ -230,10 +263,8 @@ def extract_popularity(html):
 def extract_genres(html, artist_id):
     genres = []
     escaped_id = re.escape(artist_id)
-
     pattern = r'"id"\s*:\s*"' + escaped_id + r'".{0,5000}?"genres"\s*:\s*\[([^\]]*)\]'
     match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
-
     if match:
         genres = re.findall(r'"([^"]+)"', match.group(1))
         if genres:
@@ -245,22 +276,18 @@ def extract_genres(html, artist_id):
         for value in values:
             if value not in genres:
                 genres.append(value)
-
     return genres
 
 
 def extract_images(html, artist_id):
     images = []
     escaped_id = re.escape(artist_id)
-
     pattern = r'"id"\s*:\s*"' + escaped_id + r'".{0,10000}?"images"\s*:\s*\[(.*?)\]'
     match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
-
     if not match:
         return images
 
     image_objects = re.findall(r'\{(.*?)\}', match.group(1), flags=re.DOTALL)
-
     for image_object in image_objects:
         url_match = re.search(r'"url"\s*:\s*"([^"]+)"', image_object)
         if not url_match:
@@ -275,7 +302,6 @@ def extract_images(html, artist_id):
             "height": int(height_match.group(1)) if height_match else None,
             "width": int(width_match.group(1)) if width_match else None
         }
-
         if image not in images:
             images.append(image)
 
@@ -314,13 +340,11 @@ def extract_monthly_listeners(page, html):
                     return int(number)
                 except ValueError:
                     pass
-
     return None
 
 
 def extract_full_artist(page, artist_id, existing_artist=None):
     artist_url = build_artist_url(artist_id)
-
     log()
     log("-" * 60)
     log("Analyse de l'artiste : {}".format(artist_id))
@@ -329,12 +353,16 @@ def extract_full_artist(page, artist_id, existing_artist=None):
 
     try:
         page.goto(artist_url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_load_state("networkidle", timeout=30000)
     except PlaywrightTimeoutError:
         log("⚠️ Timeout de chargement.")
     except Exception as error:
         log("❌ Erreur chargement artiste : {}".format(error))
         return existing_artist
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=30000)
+    except Exception:
+        pass
 
     time.sleep(EXTRACTION_DELAY)
 
@@ -375,10 +403,8 @@ def extract_full_artist(page, artist_id, existing_artist=None):
         for key in ["name", "followers", "monthly_listeners", "popularity"]:
             if artist[key] is None and existing_artist.get(key) is not None:
                 artist[key] = existing_artist.get(key)
-
         if not artist["genres"]:
             artist["genres"] = existing_artist.get("genres", [])
-
         if not artist["images"]:
             artist["images"] = existing_artist.get("images", [])
 
@@ -388,7 +414,6 @@ def extract_full_artist(page, artist_id, existing_artist=None):
     log("Popularité : {}".format(artist["popularity"] if artist["popularity"] is not None else "non trouvé"))
     log("Genres : {}".format(", ".join(artist["genres"]) if artist["genres"] else "aucun"))
     log("Images : {}".format(len(artist["images"])))
-
     return artist
 
 
@@ -401,18 +426,14 @@ def process_related_page(browser, database, related_url):
     log("RECHERCHE DES ARTISTES SIMILAIRES")
     log("=" * 70)
 
-    related_page = browser.new_page(viewport={"width": 1600, "height": 2200})
-    related_artists = {}
-
+    related_page = browser.new_page()
     try:
         log("Ouverture de la page related...")
         related_page.goto(related_url, wait_until="domcontentloaded", timeout=60000)
-
         try:
             related_page.wait_for_load_state("networkidle", timeout=30000)
         except Exception:
             pass
-
         related_page.wait_for_timeout(4000)
 
         for i in range(12):
@@ -420,95 +441,53 @@ def process_related_page(browser, database, related_url):
             related_page.mouse.wheel(0, 2500)
             related_page.wait_for_timeout(1000)
 
-        try:
-            related_page.locator('a[href*="/artist/"]').first.wait_for(timeout=15000)
-        except Exception:
-            pass
-
-        hrefs = related_page.locator('a[href*="/artist/"]').evaluate_all(
-            "els => [...new Set(els.map(e => e.href).filter(Boolean))]"
-        )
-
-        log("Liens artistes bruts détectés : {}".format(len(hrefs)))
-
-        for url in hrefs:
-            artist_id = extract_artist_id(url)
-
-            if not artist_id:
-                continue
-            if artist_id == source_artist_id:
-                continue
-            if artist_id in existing_ids:
-                continue
-            if artist_id in related_artists:
-                continue
-
-            clean_url = build_artist_url(artist_id)
-            timestamp = now()
-
-            related_artists[artist_id] = {
-                "id": artist_id,
-                "name": None,
-                "url": clean_url,
-                "uri": "spotify:artist:" + artist_id,
-                "followers": None,
-                "monthly_listeners": None,
-                "popularity": None,
-                "genres": [],
-                "images": [],
-                "external_urls": {"spotify": clean_url},
-                "first_seen": timestamp,
-                "last_seen": timestamp
-            }
-
-        log("Nouveaux artistes après filtrage : {}".format(len(related_artists)))
-
-        if not related_artists:
-            log("⚠️ Aucun nouvel artiste similaire trouvé.")
-            return database
-
-        detail_page = browser.new_page(viewport={"width": 1600, "height": 2200})
-
-        try:
-            total = len(related_artists)
-
-            for current, artist_id in enumerate(related_artists, start=1):
-                log()
-                log("=" * 70)
-                log("NOUVEL ARTISTE {}/{}".format(current, total))
-                log("=" * 70)
-
-                existing_artist = database["artists"].get(artist_id)
-                artist_data = extract_full_artist(detail_page, artist_id, existing_artist)
-
-                if not artist_data:
-                    log("⚠️ Impossible de récupérer cet artiste.")
-                    continue
-
-                database["artists"][artist_id] = artist_data
-                existing_ids.add(artist_id)
-                save_database(database)
-
-                log("✅ Nouvel artiste enregistré.")
-
-        finally:
-            detail_page.close()
-
+        html = related_page.content()
+    except PlaywrightTimeoutError:
+        log("⚠️ Timeout de chargement de /related.")
+        html = ""
     except Exception as error:
-        log("❌ Erreur récupération artistes similaires : {}".format(error))
-        write_log("Erreur récupération artistes similaires", "error", {"error": str(error), "url": related_url})
-
+        log("❌ Erreur chargement /related : {}".format(error))
+        html = ""
     finally:
         related_page.close()
+
+    related_artists = extract_related_artists(html, source_artist_id, existing_ids)
+
+    if not related_artists:
+        log("⚠️ Aucun nouvel artiste similaire trouvé.")
+        return database
+
+    log("{} nouvel(s) artiste(s) détecté(s).".format(len(related_artists)))
+
+    detail_page = browser.new_page()
+    try:
+        total = len(related_artists)
+        for current, artist_id in enumerate(related_artists, start=1):
+            log()
+            log("=" * 70)
+            log("NOUVEL ARTISTE {}/{}".format(current, total))
+            log("=" * 70)
+
+            existing_artist = database["artists"].get(artist_id)
+            artist_data = extract_full_artist(detail_page, artist_id, existing_artist)
+
+            if not artist_data:
+                log("⚠️ Impossible de récupérer cet artiste.")
+                continue
+
+            database["artists"][artist_id] = artist_data
+            existing_ids.add(artist_id)
+            save_database(database)
+            log("✅ Nouvel artiste enregistré.")
+    finally:
+        detail_page.close()
 
     return database
 
 
 def process_all_artists(browser, database, start_artist_number=1):
     artist_items = list(database["artists"].items())
-
     if not artist_items:
-        log()
         log("Aucun artiste à traiter dans le JSON.")
         return database, 0
 
@@ -519,7 +498,6 @@ def process_all_artists(browser, database, start_artist_number=1):
     for position, (artist_id, artist_data) in enumerate(artist_items, start=1):
         if position < start_artist_number:
             continue
-
         if processed >= BATCH_SIZE:
             break
 
@@ -550,7 +528,6 @@ def process_all_artists(browser, database, start_artist_number=1):
         log("RELATED : {}".format(related_url if related_url else "non trouvée"))
 
         monthly_listeners = artist_data.get("monthly_listeners")
-
         if monthly_listeners is None:
             log("⚠️ Auditeurs mensuels inconnus, artiste ignoré.")
             continue
@@ -580,10 +557,10 @@ def main():
     log("Navigateur : Chromium headless")
     log("Fichier : {}".format(JSON_FILE))
     log("Taille du lot : {}".format(BATCH_SIZE))
+    log("Mode logs : temps réel")
 
     database = load_database()
     progress = load_progress()
-
     start_artist_number = progress.get("last_position", 0) + 1
 
     log()
@@ -591,7 +568,6 @@ def main():
     log("Reprise à partir de l'artiste numéro : {}".format(start_artist_number))
 
     if not database["artists"]:
-        log()
         log("Aucun artiste dans le JSON.")
         write_log("Aucun artiste à traiter.", "warning")
         update_progress(status="idle", message="Aucun artiste à traiter", total=0, processed=0, progress_pct=0)
@@ -613,9 +589,8 @@ def main():
         log("Démarrage de Chromium...")
 
         try:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=HEADLESS)
         except Exception as error:
-            log()
             log("❌ Impossible de démarrer Chromium.")
             log("➡️ Vérifie l'installation avec : python -m playwright install --with-deps chromium")
             log(str(error))
@@ -624,9 +599,12 @@ def main():
             return
 
         try:
-            database, last_position = process_all_artists(browser, database, start_artist_number=start_artist_number)
+            database, last_position = process_all_artists(
+                browser,
+                database,
+                start_artist_number=start_artist_number
+            )
         finally:
-            log()
             log("Fermeture de Chromium...")
             try:
                 browser.close()
@@ -656,12 +634,10 @@ def main():
     log("=" * 70)
     log("LOT TERMINÉ")
     log("=" * 70)
-    log()
     log("Dernière position traitée : {}".format(last_position))
     log("Prochain démarrage : {}".format(next_start))
     log("Total artistes dans le JSON : {}".format(len(database["artists"])))
     log("Fichier : {}".format(JSON_FILE))
-    log()
 
 
 if __name__ == "__main__":
