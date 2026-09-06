@@ -13,7 +13,7 @@ LOG_FILE = "last-run.json"
 EXTRACTION_DELAY = 2
 SPOTIFY_DOMAIN = "https://open.spotify.com"
 MONTHLY_LISTENER_LIMIT = 10000
-BATCH_SIZE = 50
+BATCH_SIZE = 500
 
 
 def now():
@@ -109,29 +109,12 @@ def extract_artist_id(url):
         return None
 
     url = url.strip()
-
     match = re.search(
         r"https?://open\.spotify\.com/(?:[^/]+/)*artist/([A-Za-z0-9]+)",
         url,
         flags=re.IGNORECASE
     )
     return match.group(1) if match else None
-
-
-def normalize_spotify_url(url):
-    if not url:
-        return None
-
-    url = url.strip()
-    artist_id = extract_artist_id(url)
-
-    if not artist_id:
-        return None
-
-    if not re.match(r"^https?://open\.spotify\.com/", url, flags=re.IGNORECASE):
-        return None
-
-    return url.split("?")[0].rstrip("/")
 
 
 def build_artist_url(artist_id):
@@ -143,7 +126,6 @@ def build_related_url(artist_url):
         return None
 
     artist_url = artist_url.strip().rstrip("/")
-
     if artist_url.endswith("/related"):
         return artist_url
 
@@ -186,62 +168,6 @@ def save_database(database):
         return False
 
 
-def extract_related_artists(html, source_artist_id, existing_ids):
-    artists = {}
-
-    if not html:
-        return artists
-
-    pattern = re.compile(
-    r'href\s*=\s*["\']([^"\']*?/artist/[^"\']+)["\']',
-    flags=re.IGNORECASE
-    )
-
-    matches = pattern.findall(html)
-
-    print("Liens artistes détectés :", len(matches))
-    print("Exemples :", matches[:5])
-
-    print()
-    print("Liens artistes détectés : {}".format(len(matches)))
-
-    for raw_url in matches:
-        url = raw_url.replace("\\/", "/").replace("&amp;", "&")
-
-        if url.startswith("/"):
-            url = SPOTIFY_DOMAIN + url
-
-        artist_id = extract_artist_id(url)
-        if not artist_id:
-            continue
-
-        if artist_id == source_artist_id:
-            continue
-
-        if artist_id in existing_ids or artist_id in artists:
-            continue
-
-        clean_url = build_artist_url(artist_id)
-        timestamp = now()
-
-        artists[artist_id] = {
-            "id": artist_id,
-            "name": None,
-            "url": clean_url,
-            "uri": "spotify:artist:" + artist_id,
-            "followers": None,
-            "monthly_listeners": None,
-            "popularity": None,
-            "genres": [],
-            "images": [],
-            "external_urls": {"spotify": clean_url},
-            "first_seen": timestamp,
-            "last_seen": timestamp
-        }
-
-    return artists
-
-
 def find_integer_value(html, keys):
     for key in keys:
         pattern = r'"' + re.escape(key) + r'"\s*:\s*([0-9]+)'
@@ -256,7 +182,6 @@ def find_integer_value(html, keys):
 
 def extract_artist_name(html, artist_id):
     escaped_id = re.escape(artist_id)
-
     patterns = [
         r'"uri"\s*:\s*"spotify:artist:' + escaped_id + r'".{0,5000}?"name"\s*:\s*"([^"]+)"',
         r'"id"\s*:\s*"' + escaped_id + r'".{0,5000}?"name"\s*:\s*"([^"]+)"',
@@ -397,23 +322,19 @@ def extract_full_artist(page, artist_id, existing_artist=None):
     artist_url = build_artist_url(artist_id)
 
     print()
-    print("------------------------------------------------------------")
+    print("-" * 60)
     print("Analyse de l'artiste : {}".format(artist_id))
     print("URL : {}".format(artist_url))
-    print("------------------------------------------------------------")
+    print("-" * 60)
 
     try:
         page.goto(artist_url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_load_state("networkidle", timeout=30000)
     except PlaywrightTimeoutError:
         print("⚠️ Timeout de chargement.")
     except Exception as error:
         print("❌ Erreur chargement artiste : {}".format(error))
         return existing_artist
-
-    try:
-        page.wait_for_load_state("networkidle", timeout=30000)
-    except Exception:
-        pass
 
     time.sleep(EXTRACTION_DELAY)
 
@@ -461,7 +382,6 @@ def extract_full_artist(page, artist_id, existing_artist=None):
         if not artist["images"]:
             artist["images"] = existing_artist.get("images", [])
 
-    print()
     print("Nom : {}".format(artist["name"] if artist["name"] else "non trouvé"))
     print("Followers : {}".format(artist["followers"] if artist["followers"] is not None else "non trouvé"))
     print("Auditeurs mensuels : {}".format(artist["monthly_listeners"] if artist["monthly_listeners"] is not None else "non trouvé"))
@@ -481,40 +401,34 @@ def process_related_page(browser, database, related_url):
     print("RECHERCHE DES ARTISTES SIMILAIRES")
     print("=" * 70)
 
-    related_page = browser.new_page()
+    related_page = browser.new_page(viewport={"width": 1600, "height": 2200})
+    related_artists = {}
 
     try:
-        related_page.goto(
-            related_url,
-            wait_until="domcontentloaded",
-            timeout=60000
-        )
+        related_page.goto(related_url, wait_until="domcontentloaded", timeout=60000)
 
         try:
-            related_page.wait_for_load_state(
-                "networkidle",
-                timeout=30000
-            )
+            related_page.wait_for_load_state("networkidle", timeout=30000)
         except Exception:
             pass
 
-        time.sleep(EXTRACTION_DELAY)
+        related_page.wait_for_timeout(4000)
 
-        # Faire défiler plusieurs fois pour déclencher le chargement
-        # des artistes dans l'interface Spotify.
-        for _ in range(8):
-            related_page.mouse.wheel(0, 1200)
-            time.sleep(1)
+        for _ in range(12):
+            related_page.mouse.wheel(0, 2500)
+            related_page.wait_for_timeout(1000)
 
-        links = related_page.locator('a[href*="/artist/"]')
-        hrefs = links.evaluate_all(
-            "elements => elements.map(element => element.href)"
+        try:
+            related_page.locator('a[href*="/artist/"]').first.wait_for(timeout=15000)
+        except Exception:
+            pass
+
+        hrefs = related_page.locator('a[href*="/artist/"]').evaluate_all(
+            "els => [...new Set(els.map(e => e.href).filter(Boolean))]"
         )
 
         print()
-        print("Liens artistes détectés dans le navigateur : {}".format(len(hrefs)))
-
-        related_artists = {}
+        print("Liens artistes bruts détectés : {}".format(len(hrefs)))
 
         for url in hrefs:
             artist_id = extract_artist_id(url)
@@ -546,52 +460,45 @@ def process_related_page(browser, database, related_url):
                 "last_seen": timestamp
             }
 
-        print("Nouveaux artistes après filtrage : {}".format(
-            len(related_artists)
-        ))
+        print("Nouveaux artistes après filtrage : {}".format(len(related_artists)))
+
+        if not related_artists:
+            print("⚠️ Aucun nouvel artiste similaire trouvé.")
+            return database
+
+        detail_page = browser.new_page(viewport={"width": 1600, "height": 2200})
+
+        try:
+            total = len(related_artists)
+
+            for current, artist_id in enumerate(related_artists, start=1):
+                print()
+                print("=" * 70)
+                print("NOUVEL ARTISTE {}/{}".format(current, total))
+                print("=" * 70)
+
+                existing_artist = database["artists"].get(artist_id)
+                artist_data = extract_full_artist(detail_page, artist_id, existing_artist)
+
+                if not artist_data:
+                    print("⚠️ Impossible de récupérer cet artiste.")
+                    continue
+
+                database["artists"][artist_id] = artist_data
+                existing_ids.add(artist_id)
+                save_database(database)
+
+                print("✅ Nouvel artiste enregistré.")
+
+        finally:
+            detail_page.close()
 
     except Exception as error:
         print("❌ Erreur récupération artistes similaires : {}".format(error))
-        related_page.close()
-        return database
-
-    related_page.close()
-
-    if not related_artists:
-        print()
-        print("⚠️ Aucun nouvel artiste similaire trouvé.")
-        return database
-
-    detail_page = browser.new_page()
-
-    try:
-        total = len(related_artists)
-
-        for current, artist_id in enumerate(related_artists, start=1):
-            print()
-            print("=" * 70)
-            print("NOUVEL ARTISTE {}/{}".format(current, total))
-            print("=" * 70)
-
-            existing_artist = database["artists"].get(artist_id)
-            artist_data = extract_full_artist(
-                detail_page,
-                artist_id,
-                existing_artist
-            )
-
-            if not artist_data:
-                print("⚠️ Impossible de récupérer cet artiste.")
-                continue
-
-            database["artists"][artist_id] = artist_data
-            existing_ids.add(artist_id)
-            save_database(database)
-
-            print("✅ Nouvel artiste enregistré.")
+        write_log("Erreur récupération artistes similaires", "error", {"error": str(error), "url": related_url})
 
     finally:
-        detail_page.close()
+        related_page.close()
 
     return database
 
