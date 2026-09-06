@@ -13,7 +13,7 @@ LOG_FILE = "last-run.json"
 EXTRACTION_DELAY = 2
 SPOTIFY_DOMAIN = "https://open.spotify.com"
 MONTHLY_LISTENER_LIMIT = 10000
-BATCH_SIZE = 500
+BATCH_SIZE = 50
 
 
 def now():
